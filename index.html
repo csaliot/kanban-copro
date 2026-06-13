@@ -63,9 +63,12 @@ body{font-family:var(--f);background:var(--bg);color:var(--text);height:100vh;di
 .card{background:var(--s2);border:1px solid var(--border);border-radius:var(--rs);cursor:pointer;transition:box-shadow .18s,border-color .18s;user-select:none}
 .card:hover{box-shadow:0 3px 12px rgba(0,0,0,.4);border-color:var(--s3)}
 .card.dragging{opacity:.3;cursor:grabbing}
+.card.drag-over-top{box-shadow:inset 0 2px 0 0 var(--accent)}
+.card.drag-over-bottom{box-shadow:inset 0 -2px 0 0 var(--accent)}
 .card.card-locked{cursor:default}
 .card-head{display:flex;align-items:center;gap:4px;padding:6px 8px}
 .card-prio-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:1px}
+.card-num{font-size:.62rem;font-weight:700;color:var(--dim);flex-shrink:0;font-family:monospace}
 .card-title{font-size:.76rem;font-weight:600;flex:1;line-height:1.3;word-break:break-word}
 .card-btns{display:flex;gap:2px;flex-shrink:0;opacity:0;transition:opacity .15s}
 .card:hover .card-btns{opacity:1}
@@ -994,15 +997,28 @@ function initBoard(){
           dragId = null;
           return;
         }
-        const who = currentUser ? (currentUser.name || currentUser.id) : '?';
-        if(t.status !== col.name){
-          if(!t.history) t.history = [];
-          t.history.push({ at: new Date().toISOString(), by: who, action: `Statut : ${t.status} → ${col.name}` });
-          t.status = col.name;
-          t.updatedAt = new Date().toISOString();
-          t.updatedBy = who;
+        // Dépose sur l'espace vide de la colonne (pas sur une carte précise) :
+        // place la tâche en fin de cette colonne.
+        const seqIds = orderedTaskIdsInColumn(col.name).filter(id=>id!==dragId);
+        const lastId = seqIds[seqIds.length-1];
+        if(lastId){
+          reorderTask(dragId, col.name, lastId, false);
+        } else {
+          // Colonne vide : changement de statut direct + ordre initial
+          const who = currentUser ? (currentUser.name || currentUser.id) : '?';
+          const sourceStatus = t.status;
+          if(sourceStatus !== col.name){
+            if(!t.history) t.history = [];
+            t.history.push({ at: new Date().toISOString(), by: who, action: `Statut : ${sourceStatus} → ${col.name}` });
+            t.status = col.name;
+            t.updatedAt = new Date().toISOString();
+            t.updatedBy = who;
+          }
+          t.order = 1;
+          if(sourceStatus !== col.name) orderedTaskIdsInColumn(sourceStatus).forEach((id,i)=>{ if(tasks[id]) tasks[id].order = i+1; });
+          applyFilters(); scheduleSave();
+          if(sourceStatus !== col.name) toast(`→ "${col.name}"`);
         }
-        applyFilters(); scheduleSave(); toast(`→ "${col.name}"`);
       }
       dragId = null;
     });
@@ -1021,15 +1037,30 @@ function render(filter){
     const n = $(`n_${cid(c.name)}`); if(n) n.textContent='0';
   });
 
+  // Groupe les tâches par colonne, triées par ordre manuel (puis date de
+  // création si absent, pour la compatibilité avec des données existantes)
+  const byCol = {};
+  C.columns.forEach(c=>{ byCol[c.name] = []; });
   Object.values(tasks).forEach(t => {
     if(filter && !filter(t)) return;
-    const col = C.columns.find(c => c.name === t.status);
-    if(!col) return;
+    if(!byCol[t.status]) return;
+    byCol[t.status].push(t);
+  });
+  C.columns.forEach(col=>{
+    const list = byCol[col.name];
+    list.sort((a,b)=>{
+      const oa = typeof a.order === 'number' ? a.order : Infinity;
+      const ob = typeof b.order === 'number' ? b.order : Infinity;
+      if(oa !== ob) return oa - ob;
+      return (a.createdAt||'').localeCompare(b.createdAt||'');
+    });
     const zone = $(cid(col.name)); if(!zone) return;
     const empty = zone.querySelector('.empty'); if(empty) empty.remove();
-    counts[col.name] = (counts[col.name]||0) + 1;
+    counts[col.name] = list.length;
     const n = $(`n_${cid(col.name)}`); if(n) n.textContent = counts[col.name];
-    zone.appendChild(buildCard(t, col));
+    list.forEach((t,i)=>{
+      zone.appendChild(buildCard(t, col, i+1));
+    });
   });
   updateLateBadge();
 }
@@ -1128,7 +1159,7 @@ function hideCommTooltip(){
   $('commTooltipBackdrop').classList.remove('show');
 }
 
-function buildCard(t, col){
+function buildCard(t, col, num){
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.id = t.id;
@@ -1140,7 +1171,37 @@ function buildCard(t, col){
     if(locked){ e.preventDefault(); return; }
     dragId = t.id; card.classList.add('dragging');
   });
-  card.addEventListener('dragend',   () => card.classList.remove('dragging'));
+  card.addEventListener('dragend',   () => { card.classList.remove('dragging'); card.classList.remove('drag-over-top','drag-over-bottom'); });
+
+  // Survol d'une carte pendant un drag : affiche un repère d'insertion
+  // au-dessus ou en-dessous selon la position de la souris
+  card.addEventListener('dragover', e => {
+    e.preventDefault();
+    if(!dragId || dragId === t.id) return;
+    const rect = card.getBoundingClientRect();
+    const before = (e.clientY - rect.top) < rect.height / 2;
+    card.classList.toggle('drag-over-top', before);
+    card.classList.toggle('drag-over-bottom', !before);
+  });
+  card.addEventListener('dragleave', () => {
+    card.classList.remove('drag-over-top','drag-over-bottom');
+  });
+  card.addEventListener('drop', e => {
+    e.preventDefault();
+    e.stopPropagation(); // empêche le drop de retomber sur la zone (qui placerait en fin de liste)
+    const before = card.classList.contains('drag-over-top');
+    card.classList.remove('drag-over-top','drag-over-bottom');
+    if(card.parentElement) card.parentElement.classList.remove('over');
+    if(!dragId || dragId === t.id || !tasks[dragId]) return;
+    const dragged = tasks[dragId];
+    if(!canModifyTask(dragged)){
+      toast('🔒 Statut verrouillé — seul un administrateur peut le modifier');
+      dragId = null;
+      return;
+    }
+    reorderTask(dragId, t.status, t.id, before);
+    dragId = null;
+  });
 
   const prio = C.priorities.find(p => p.name === t.priority);
   const prioColor = prio ? prio.color : '#4a5070';
@@ -1211,12 +1272,13 @@ function buildCard(t, col){
   // Indicateur discret (badge avec compteur) + ajout rapide — le contenu des
   // commentaires n'est visible qu'au survol via le tooltip (showCommTooltip)
   const commBadge = comments.length
-    ? `<span class="card-comm-badge" title="${comments.length} commentaire(s) — survoler pour les lire">💬 ${comments.length}</span>` : '';
+    ? `<span class="card-comm-badge">💬 ${comments.length}</span>` : '';
   const commQuickHtml = `<div class="card-comm-section"><div class="card-comm-quick"><input type="text" class="card-comm-input" placeholder="Ajouter un commentaire..."><button class="card-comm-send">Envoyer</button></div></div>`;
 
   card.innerHTML = `
     <div class="card-head">
-      <div class="card-prio-dot" style="background:${prioColor}" title="${esc(t.priority||'')}"></div>
+      <span class="card-num">#${num}</span>
+      <div class="card-prio-dot" style="background:${prioColor}"></div>
       <div class="card-title">${esc(t.title)}</div>
       <div class="card-btns">
         ${locked ? '' : `<button class="cb cb-edit" title="Modifier">✏</button>
@@ -1568,6 +1630,78 @@ function openModal(status, id){
 
 function closeModal(){ $('backdrop').classList.remove('open'); editId=null; }
 
+// Calcule un nombre d'ordre plaçant une tâche en fin d'une colonne donnée
+function nextOrderInColumn(statusName){
+  let max = 0;
+  Object.values(tasks).forEach(t=>{
+    if(t.status === statusName && typeof t.order === 'number' && t.order > max) max = t.order;
+  });
+  return max + 1;
+}
+
+// Liste ordonnée des IDs de tâches d'une colonne (même tri que render())
+function orderedTaskIdsInColumn(statusName){
+  return Object.values(tasks)
+    .filter(t=>t.status===statusName)
+    .sort((a,b)=>{
+      const oa = typeof a.order === 'number' ? a.order : Infinity;
+      const ob = typeof b.order === 'number' ? b.order : Infinity;
+      if(oa !== ob) return oa - ob;
+      return (a.createdAt||'').localeCompare(b.createdAt||'');
+    })
+    .map(t=>t.id);
+}
+
+// Attribue un "order" séquentiel (1,2,3...) par colonne aux tâches qui n'en
+// ont pas encore (ex: données créées avant l'ajout de l'ordonnancement manuel).
+// Idempotent : ne change rien si toutes les tâches ont déjà un order.
+function normalizeTaskOrders(){
+  let changed = false;
+  C.columns.forEach(col=>{
+    orderedTaskIdsInColumn(col.name).forEach((id,i)=>{
+      const t = tasks[id];
+      if(t && t.order !== i+1){ t.order = i+1; changed = true; }
+    });
+  });
+  return changed;
+}
+
+// Déplace la tâche draggedId juste avant/après la tâche targetId dans la
+// colonne targetStatus, puis renumérote (order = 1,2,3...) la colonne
+// d'arrivée et, si différente, la colonne de départ.
+function reorderTask(draggedId, targetStatus, targetId, before){
+  const dragged = tasks[draggedId];
+  const sourceStatus = dragged.status;
+  const who = currentUser ? (currentUser.name || currentUser.id) : '?';
+
+  // Construit la nouvelle séquence de la colonne d'arrivée (sans la tâche déplacée)
+  let seq = orderedTaskIdsInColumn(targetStatus).filter(id=>id!==draggedId);
+  let idx = seq.indexOf(targetId);
+  if(idx === -1) idx = seq.length;
+  if(!before) idx += 1;
+  seq.splice(idx, 0, draggedId);
+
+  // Si changement de statut, journalise et met à jour les métadonnées
+  if(sourceStatus !== targetStatus){
+    if(!dragged.history) dragged.history = [];
+    dragged.history.push({ at: new Date().toISOString(), by: who, action: `Statut : ${sourceStatus} → ${targetStatus}` });
+    dragged.status = targetStatus;
+    dragged.updatedAt = new Date().toISOString();
+    dragged.updatedBy = who;
+  }
+
+  // Renumérote la colonne d'arrivée
+  seq.forEach((id,i)=>{ if(tasks[id]) tasks[id].order = i+1; });
+
+  // Renumérote la colonne de départ si différente (referme le "trou" laissé)
+  if(sourceStatus !== targetStatus){
+    orderedTaskIdsInColumn(sourceStatus).forEach((id,i)=>{ if(tasks[id]) tasks[id].order = i+1; });
+  }
+
+  applyFilters(); scheduleSave();
+  if(sourceStatus !== targetStatus) toast(`→ "${targetStatus}"`);
+}
+
 function saveTask(){
   const title = $('mTaskTitle').value.trim();
   if(!title){ toast('⚠ Titre obligatoire'); return; }
@@ -1586,10 +1720,16 @@ function saveTask(){
   if(draftComment){
     pendingComments.push({ at: new Date().toISOString(), by: who, text: draftComment });
   }
+  const newStatus = $('mStatus').value;
+  let order = existing?.order;
+  if(order === undefined || order === null || (existing && existing.status !== newStatus)){
+    order = nextOrderInColumn(newStatus);
+  }
   tasks[id] = {
     id, title,
     desc:      $('mDesc').value.trim(),
-    status:    $('mStatus').value,
+    status:    newStatus,
+    order,
     priority:  $('mPrio').value,
     subj:      $('mSubj').value,
     subsubj:   $('mSubSubj').value,
@@ -2098,6 +2238,7 @@ function importJSON(e){
       else if(d.tasks){ tasks=d.tasks; }
       else{ toast('⚠ Format invalide'); return; }
       migrateConfig(C);
+      normalizeTaskOrders();
       initBoard(); buildFilterBar(); applyFilters(); applyLabels();
       if(settingsOpen) renderSettings();
       toast(`✅ ${Object.keys(tasks).length} tâches importées`);
@@ -2717,6 +2858,7 @@ async function doFirstConnect(){
     if(data.v>=2 && data.C){ C=data.C; tasks=data.tasks||{}; }
     else if(data.tasks){ tasks=data.tasks; }
     migrateConfig(C);
+    normalizeTaskOrders();
 
     // Enregistre la configuration de synchronisation pour cet appareil
     syncCfg = cfg;
@@ -2860,6 +3002,7 @@ async function syncLoad(){
       if(data.v>=2&&data.C){C=data.C;tasks=data.tasks||{};}
       else if(data.tasks){tasks=data.tasks;}
       migrateConfig(C);
+      normalizeTaskOrders();
       // Adopte les comptes partagés (créations/modifications faites par un autre
       // admin depuis un autre appareil), tant qu'un identifiant administrateur
       // local n'est pas perdu dans l'opération.
