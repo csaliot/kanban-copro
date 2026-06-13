@@ -411,7 +411,35 @@ textarea.finput{resize:vertical;min-height:52px}
     <div class="auth-err" id="authErr"></div>
     <button class="btn bp" id="btnAuthLogin" style="width:100%;padding:9px">Se connecter</button>
     <button class="btn bg" id="btnShowRecovery" style="width:100%;padding:6px;font-size:.7rem">Mot de passe perdu ?</button>
+    <button class="btn bg" id="btnShowFirstConnect" style="width:100%;padding:6px;font-size:.7rem">Première connexion / Configurer l'accès</button>
     <div class="auth-footer" id="authFooter"></div>
+  </div>
+</div>
+
+<!-- ÉCRAN PREMIÈRE CONNEXION : configure l'accès aux données partagées -->
+<div id="firstConnectScreen" class="auth-screen" style="display:none">
+  <div class="auth-card" style="max-width:420px">
+    <div class="auth-logo">🔗 Configurer l'accès</div>
+    <div class="auth-subtitle">Renseignez les informations de connexion aux données partagées du conseil syndical (transmises par votre administrateur). Cela permet de récupérer les comptes existants et les tâches en cours sur cet appareil.</div>
+    <div class="sync-tabs">
+      <div class="sync-tab active" data-fctab="github">GitHub Gist</div>
+      <div class="sync-tab" data-fctab="jsonbin">JSONBin</div>
+      <div class="sync-tab" data-fctab="server">Serveur local</div>
+    </div>
+    <div class="sync-panel active" id="fc-github">
+      <div class="sync-field"><label>Token GitHub (PAT)</label><input type="password" id="fc-gh-token" placeholder="ghp_..."></div>
+      <div class="sync-field"><label>Gist ID</label><input type="text" id="fc-gh-gist" placeholder="a1b2c3..."></div>
+    </div>
+    <div class="sync-panel" id="fc-jsonbin">
+      <div class="sync-field"><label>Master Key</label><input type="password" id="fc-jb-key" placeholder="$2a$10$..."></div>
+      <div class="sync-field"><label>Bin ID</label><input type="text" id="fc-jb-bin" placeholder="64a3f..."></div>
+    </div>
+    <div class="sync-panel" id="fc-server">
+      <div class="sync-field"><label>URL du serveur</label><input type="text" id="fc-sv-url" placeholder="http://192.168.1.x:8765"></div>
+    </div>
+    <div class="auth-err" id="fcErr"></div>
+    <button class="btn bp" id="btnFirstConnectSubmit" style="width:100%;padding:9px">Récupérer les données et continuer</button>
+    <button class="btn bg" id="btnFirstConnectCancel" style="width:100%;padding:6px;font-size:.7rem">Retour à la connexion</button>
   </div>
 </div>
 
@@ -439,6 +467,8 @@ textarea.finput{resize:vertical;min-height:52px}
     <div style="font-size:.65rem;color:var(--dim)">Min. 8 caractères, 1 majuscule, 1 minuscule, 1 chiffre, 1 caractère spécial.</div>
     <div class="auth-err" id="setupErr"></div>
     <button class="btn bp" id="btnSetupCreate" style="width:100%;padding:9px">Créer le compte administrateur</button>
+    <div style="text-align:center;font-size:.65rem;color:var(--dim);margin-top:2px">— ou —</div>
+    <button class="btn bg" id="btnShowFirstConnectFromSetup" style="width:100%;padding:6px;font-size:.7rem">Un administrateur existe déjà : Configurer l'accès</button>
   </div>
 </div>
 
@@ -586,7 +616,7 @@ textarea.finput{resize:vertical;min-height:52px}
       <div class="s-panel" id="tab-users">
         <p style="font-size:.72rem;color:var(--muted);margin-bottom:10px">Gérer les comptes. Les mots de passe sont dérivés via PBKDF2-SHA256 (100 000 itérations) avec sel unique par compte avant stockage local — jamais en clair.</p>
         <div class="sync-info" style="margin-bottom:10px">
-          ⚠ <strong>Limite de sécurité</strong> : ces données sont stockées dans le navigateur (localStorage), sans serveur d'authentification. Une personne ayant un accès physique/technique au poste peut théoriquement extraire les hashes et tenter un cassage hors-ligne. Pour une sécurité renforcée, privilégier le mode "Serveur local" en synchronisation et limiter l'accès physique aux postes.
+          ⚠ <strong>Limite de sécurité</strong> : ces comptes (identifiants + hashs de mots de passe + code de secours) sont stockés dans le navigateur (localStorage) <strong>et inclus dans la synchronisation</strong>, pour permettre à un nouvel appareil de les récupérer via "Première connexion / Configurer l'accès". Seuls des hashs PBKDF2 (jamais les mots de passe en clair) circulent ainsi — mais toute personne ayant accès à votre Gist/JSONBin/serveur de synchronisation peut donc voir la liste des comptes et tenter un cassage hors-ligne des mots de passe. Choisissez des mots de passe robustes et gardez l'accès à votre source de synchronisation restreint aux membres de confiance.
         </div>
         <div class="s-sec">
           <div class="s-sec-title">Comptes actifs</div>
@@ -689,7 +719,8 @@ textarea.finput{resize:vertical;min-height:52px}
     <div class="m-title">☁ Synchronisation partagée</div>
     <p style="font-size:.75rem;color:var(--muted);margin-bottom:6px">Stocker les données sur un service partagé, accessible à tous les membres du conseil syndical. La configuration ci-dessous est sauvegardée dans votre navigateur.</p>
     <div class="sync-info" style="margin-bottom:4px">
-      💡 <strong>Pour que tout le monde voie les mêmes données</strong> : configurez la connexion ci-dessous, testez-la, puis cliquez sur "Activer". Ensuite, cliquez sur <strong>"📦 Générer une copie configurée"</strong> en bas de cette fenêtre : un fichier .html est téléchargé, déjà connecté à cette même source de données. Partagez ce fichier (ou son lien, s'il est mis en ligne) avec les autres membres — ils n'auront rien à configurer.
+      💡 <strong>Pour que tout le monde voie les mêmes données</strong> : configurez la connexion ci-dessous, testez-la, puis cliquez sur "Activer". Partagez ensuite le <strong>lien</strong> de l'application (sans configuration intégrée) à tous les membres. À leur première ouverture, ils cliquent sur <strong>"Première connexion / Configurer l'accès"</strong> sur l'écran de connexion, saisissent les mêmes informations de connexion que ci-dessous (token/clé), et récupèrent ainsi automatiquement les comptes existants et les données du conseil syndical.<br><br>
+      ⚠️ Évitez "📦 Générer une copie configurée" si vous comptez héberger le fichier sur un espace public (ex: GitHub Pages) : il intègre votre clé/token dans le code, ce que GitHub bloque (protection des secrets) et qui exposerait cette clé à tous les visiteurs.
     </div>
     <div class="sync-tabs">
       <div class="sync-tab active" data-stab="none">Désactivé</div>
@@ -2378,6 +2409,7 @@ function hideApp(){
     $('forceChangeScreen').style.display = 'none';
     $('recoveryScreen').style.display = 'none';
     $('recoveryRevealScreen').style.display = 'none';
+    $('firstConnectScreen').style.display = 'none';
     $('setupScreen').style.display = 'flex';
     $('userBadge').style.display = 'none';
     $('btnSettings').style.display = 'none';
@@ -2388,6 +2420,7 @@ function hideApp(){
   $('setupScreen').style.display = 'none';
   $('recoveryScreen').style.display = 'none';
   $('recoveryRevealScreen').style.display = 'none';
+  $('firstConnectScreen').style.display = 'none';
   $('authScreen').style.display = 'flex';
   $('authScreen').style.background = 'var(--bg)';
   $('forceChangeScreen').style.display = 'none';
@@ -2614,6 +2647,94 @@ $('btnRecoveryCancel').addEventListener('click', closeRecoveryScreen);
 $('btnRecoverySubmit').addEventListener('click', doRecovery);
 $('recCode').addEventListener('keydown', e=>{ if(e.key==='Enter') doRecovery(); });
 
+// ── Première connexion : configurer l'accès aux données partagées ──────────
+let fcMode = 'github';
+
+function openFirstConnectScreen(){
+  $('authScreen').style.display = 'none';
+  $('setupScreen').style.display = 'none';
+  $('firstConnectScreen').style.display = 'flex';
+  $('fc-gh-token').value=''; $('fc-gh-gist').value='';
+  $('fc-jb-key').value=''; $('fc-jb-bin').value='';
+  $('fc-sv-url').value='';
+  $('fcErr').textContent='';
+  activateFcTab('github');
+}
+function closeFirstConnectScreen(){
+  $('firstConnectScreen').style.display = 'none';
+  if(authData){
+    $('authScreen').style.display = 'flex';
+  } else {
+    $('setupScreen').style.display = 'flex';
+  }
+}
+function activateFcTab(mode){
+  fcMode = mode;
+  document.querySelectorAll('#firstConnectScreen .sync-tab').forEach(t=>t.classList.toggle('active', t.dataset.fctab===mode));
+  document.querySelectorAll('#firstConnectScreen .sync-panel').forEach(p=>p.classList.remove('active'));
+  $('fc-'+mode).classList.add('active');
+}
+document.querySelectorAll('#firstConnectScreen .sync-tab').forEach(tab=>{
+  tab.addEventListener('click', ()=>activateFcTab(tab.dataset.fctab));
+});
+
+async function doFirstConnect(){
+  const err = $('fcErr');
+  err.textContent = '';
+  let cfg;
+  if(fcMode === 'github'){
+    const ghToken = $('fc-gh-token').value.trim();
+    const ghGist = $('fc-gh-gist').value.trim();
+    if(!ghToken || !ghGist){ err.textContent='Remplir les deux champs'; return; }
+    cfg = {mode:'github', ghToken, ghGist, jbKey:'', jbBin:'', svUrl:''};
+  } else if(fcMode === 'jsonbin'){
+    const jbKey = $('fc-jb-key').value.trim();
+    const jbBin = $('fc-jb-bin').value.trim();
+    if(!jbKey || !jbBin){ err.textContent='Remplir les deux champs'; return; }
+    cfg = {mode:'jsonbin', jbKey, jbBin, ghToken:'', ghGist:'', svUrl:''};
+  } else {
+    const svUrl = $('fc-sv-url').value.trim();
+    if(!svUrl){ err.textContent="Entrer l'URL du serveur"; return; }
+    cfg = {mode:'server', svUrl, jbKey:'', jbBin:'', ghToken:'', ghGist:''};
+  }
+
+  err.textContent = 'Connexion en cours...';
+  try{
+    const data = await fetchSyncData(cfg);
+    if(!data) throw new Error('Aucune donnée reçue');
+
+    // Récupère les comptes utilisateurs partagés, s'ils existent
+    if(data.authData && data.authData.users && data.authData.users.length){
+      authData = data.authData;
+      saveUsers(authData);
+    } else if(!authData){
+      err.textContent = "Connexion réussie, mais aucun compte n'a encore été partagé par votre administrateur. Demandez-lui d'ouvrir Paramètres → Synchronisation → Forcer sync, puis réessayez.";
+      return;
+    }
+
+    // Récupère les tâches et la configuration
+    if(data.v>=2 && data.C){ C=data.C; tasks=data.tasks||{}; }
+    else if(data.tasks){ tasks=data.tasks; }
+    migrateConfig(C);
+
+    // Enregistre la configuration de synchronisation pour cet appareil
+    syncCfg = cfg;
+    saveSyncCfg();
+
+    closeFirstConnectScreen();
+    initBoard(); buildFilterBar(); applyFilters(); applyLabels();
+    toast('✅ Données récupérées — connectez-vous avec votre identifiant');
+    setTimeout(()=>$('authUser').focus(),60);
+  } catch(e){
+    err.textContent = 'Erreur : ' + e.message;
+  }
+}
+
+$('btnShowFirstConnect').addEventListener('click', openFirstConnectScreen);
+$('btnShowFirstConnectFromSetup').addEventListener('click', openFirstConnectScreen);
+$('btnFirstConnectCancel').addEventListener('click', closeFirstConnectScreen);
+$('btnFirstConnectSubmit').addEventListener('click', doFirstConnect);
+
 // Changement de mot de passe forcé (première connexion / après réinitialisation)
 $('btnForceChange').addEventListener('click', doForceChange);
 $('fcConfirmPass').addEventListener('keydown', e=>{ if(e.key==='Enter') doForceChange(); });
@@ -2703,30 +2824,37 @@ function setSpStatus(prefix,state,msg){
   if(lbl) lbl.textContent=msg;
 }
 
+// Récupère les données distantes brutes selon une config de sync donnée.
+// Réutilisé par syncLoad() et par l'écran "Première connexion / Configurer l'accès".
+async function fetchSyncData(cfg){
+  let data;
+  if(cfg.mode==='jsonbin'){
+    const r=await fetch('https://api.jsonbin.io/v3/b/'+cfg.jbBin+'/latest',
+      {headers:{'X-Master-Key':cfg.jbKey}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    data=(await r.json()).record;
+  } else if(cfg.mode==='github'){
+    const r=await fetch('https://api.github.com/gists/'+cfg.ghGist,
+      {headers:{'Authorization':'token '+cfg.ghToken,'Accept':'application/vnd.github.v3+json'}});
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const j=await r.json();
+    const raw=j.files['kanban.json']?.content;
+    if(!raw) throw new Error('Fichier kanban.json absent du gist');
+    data=JSON.parse(raw);
+  } else if(cfg.mode==='server'){
+    const base=cfg.svUrl.replace(/\/$/,'');
+    const r=await fetch(base+'/data');
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    data=await r.json();
+  }
+  return data;
+}
+
 async function syncLoad(){
   if(syncCfg.mode==='none') return;
   setSyncStatus('wait','Chargement...');
   try{
-    let data;
-    if(syncCfg.mode==='jsonbin'){
-      const r=await fetch('https://api.jsonbin.io/v3/b/'+syncCfg.jbBin+'/latest',
-        {headers:{'X-Master-Key':syncCfg.jbKey}});
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      data=(await r.json()).record;
-    } else if(syncCfg.mode==='github'){
-      const r=await fetch('https://api.github.com/gists/'+syncCfg.ghGist,
-        {headers:{'Authorization':'token '+syncCfg.ghToken,'Accept':'application/vnd.github.v3+json'}});
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      const j=await r.json();
-      const raw=j.files['kanban.json']?.content;
-      if(!raw) throw new Error('Fichier kanban.json absent du gist');
-      data=JSON.parse(raw);
-    } else if(syncCfg.mode==='server'){
-      const base=syncCfg.svUrl.replace(/\/$/,'');
-      const r=await fetch(base+'/data');
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      data=await r.json();
-    }
+    const data = await fetchSyncData(syncCfg);
     if(data){
       if(data.v>=2&&data.C){C=data.C;tasks=data.tasks||{};}
       else if(data.tasks){tasks=data.tasks;}
@@ -2743,7 +2871,10 @@ async function syncLoad(){
 async function syncSave(){
   if(syncCfg.mode==='none') return;
   setSyncStatus('wait','Sauvegarde...');
-  const data={v:3,C,tasks,at:new Date().toISOString()};
+  // authData est inclus pour permettre à un nouvel appareil de récupérer les
+  // comptes existants via "Première connexion / Configurer l'accès" (seuls
+  // les hashs PBKDF2 sont stockés, jamais les mots de passe en clair).
+  const data={v:3,C,tasks,authData,at:new Date().toISOString()};
   try{
     if(syncCfg.mode==='jsonbin'){
       const r=await fetch('https://api.jsonbin.io/v3/b/'+syncCfg.jbBin,{
