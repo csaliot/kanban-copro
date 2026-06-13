@@ -2708,7 +2708,8 @@ async function doFirstConnect(){
       authData = data.authData;
       saveUsers(authData);
     } else if(!authData){
-      err.textContent = "Connexion réussie, mais aucun compte n'a encore été partagé par votre administrateur. Demandez-lui d'ouvrir Paramètres → Synchronisation → Forcer sync, puis réessayez.";
+      const ts = data.at ? new Date(data.at).toLocaleString('fr-FR') : 'inconnue';
+      err.textContent = `Connexion réussie (données du ${ts}), mais aucun compte n'a encore été partagé par votre administrateur. Demandez-lui de se connecter, d'ouvrir ☁ Synchronisation, et de cliquer "Forcer sync" — puis réessayez ici.`;
       return;
     }
 
@@ -2830,12 +2831,12 @@ async function fetchSyncData(cfg){
   let data;
   if(cfg.mode==='jsonbin'){
     const r=await fetch('https://api.jsonbin.io/v3/b/'+cfg.jbBin+'/latest',
-      {headers:{'X-Master-Key':cfg.jbKey}});
+      {headers:{'X-Master-Key':cfg.jbKey}, cache:'no-store'});
     if(!r.ok) throw new Error('HTTP '+r.status);
     data=(await r.json()).record;
   } else if(cfg.mode==='github'){
     const r=await fetch('https://api.github.com/gists/'+cfg.ghGist,
-      {headers:{'Authorization':'token '+cfg.ghToken,'Accept':'application/vnd.github.v3+json'}});
+      {headers:{'Authorization':'token '+cfg.ghToken,'Accept':'application/vnd.github.v3+json'}, cache:'no-store'});
     if(!r.ok) throw new Error('HTTP '+r.status);
     const j=await r.json();
     const raw=j.files['kanban.json']?.content;
@@ -2843,7 +2844,7 @@ async function fetchSyncData(cfg){
     data=JSON.parse(raw);
   } else if(cfg.mode==='server'){
     const base=cfg.svUrl.replace(/\/$/,'');
-    const r=await fetch(base+'/data');
+    const r=await fetch(base+'/data', {cache:'no-store'});
     if(!r.ok) throw new Error('HTTP '+r.status);
     data=await r.json();
   }
@@ -2859,6 +2860,34 @@ async function syncLoad(){
       if(data.v>=2&&data.C){C=data.C;tasks=data.tasks||{};}
       else if(data.tasks){tasks=data.tasks;}
       migrateConfig(C);
+      // Adopte les comptes partagés (créations/modifications faites par un autre
+      // admin depuis un autre appareil), tant qu'un identifiant administrateur
+      // local n'est pas perdu dans l'opération.
+      if(data.authData && data.authData.users && data.authData.users.length
+         && JSON.stringify(data.authData) !== JSON.stringify(authData)){
+        const hadAdmin = !authData || authData.users.some(u=>u.role==='admin');
+        const willHaveAdmin = data.authData.users.some(u=>u.role==='admin');
+        if(!hadAdmin || willHaveAdmin){
+          const stillExists = !currentUser || data.authData.users.some(u=>u.id===currentUser.id);
+          authData = data.authData;
+          saveUsers(authData);
+          if(!stillExists){
+            toast('Votre compte a été supprimé par un administrateur.', 4000);
+            doLogout();
+            return;
+          }
+          // Met à jour currentUser avec les éventuelles modifications (rôle, mustChange...)
+          if(currentUser){
+            const fresh = authData.users.find(u=>u.id===currentUser.id);
+            if(fresh){
+              currentUser = fresh;
+              const s = JSON.parse(localStorage.getItem(SESSION_LS)||'null');
+              if(s){ s.user = fresh; localStorage.setItem(SESSION_LS, JSON.stringify(s)); }
+            }
+          }
+          if(settingsOpen && isAdmin()) renderUsers();
+        }
+      }
       initBoard(); buildFilterBar(); applyFilters(); applyLabels();
       setSyncStatus('ok','Synchronisé '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
     }
