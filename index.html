@@ -42,6 +42,26 @@ body{font-family:var(--f);background:var(--bg);color:var(--text);height:100vh;di
 .list-table tbody tr{cursor:pointer;transition:background .12s}
 .list-table tbody tr:hover{background:var(--s2)}
 .list-table .lt-title{font-weight:600;max-width:260px}
+.list-table .lt-num{color:var(--dim);font-family:monospace;white-space:nowrap}
+
+/* KPI / TABLEAU DE BORD */
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:16px}
+.kpi-card{background:var(--s2);border:1px solid var(--border);border-radius:var(--r);padding:12px;text-align:center}
+.kpi-card.alert{border-color:rgba(239,68,68,.4);background:rgba(239,68,68,.08)}
+.kpi-card .kpi-value{font-size:1.6rem;font-weight:800;line-height:1.1}
+.kpi-card.alert .kpi-value{color:#f87171}
+.kpi-card .kpi-label{font-size:.66rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:4px}
+.kpi-sec{margin-bottom:14px}
+.kpi-sec-title{font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:8px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+.kpi-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:.74rem}
+.kpi-bar-label{width:170px;flex-shrink:0;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kpi-bar-track{flex:1;height:8px;background:var(--s3);border-radius:4px;overflow:hidden}
+.kpi-bar-fill{height:100%;border-radius:4px}
+.kpi-bar-count{width:36px;text-align:right;color:var(--muted);flex-shrink:0;font-family:monospace}
+.kpi-late-list{display:flex;flex-direction:column;gap:5px;max-height:180px;overflow-y:auto}
+.kpi-late-item{display:flex;justify-content:space-between;gap:8px;font-size:.74rem;padding:5px 8px;background:var(--s2);border:1px solid var(--border);border-radius:var(--rs);cursor:pointer}
+.kpi-late-item:hover{border-color:var(--accent)}
+.kpi-late-item .kpi-late-due{color:#f87171;font-weight:600;flex-shrink:0;white-space:nowrap}
 .list-table .lt-due.late{color:#f87171;font-weight:600}
 .list-table .lt-due.soon{color:#f59e0b}
 .list-table .lt-empty{text-align:center;color:var(--dim);padding:20px;font-size:.72rem}
@@ -520,6 +540,7 @@ textarea.finput{resize:vertical;min-height:52px}
     </div>
     <button class="btn bp" id="btnNew">+ <span id="lb-new">Nouvelle tâche</span></button>
     <button class="btn bs" id="btnViewToggle" title="Basculer entre vue Kanban et vue Liste">📋 Vue liste</button>
+    <button class="btn bs" id="btnKpi" title="Tableau de bord / indicateurs de suivi">📊 KPI</button>
     <button class="btn bg" id="btnSettings" style="display:none">⚙ <span id="lb-settings">Paramètres</span></button>
     <div class="user-badge" id="userBadge" style="display:none">
       <div class="user-avatar" id="userAvatar"></div>
@@ -815,6 +836,17 @@ textarea.finput{resize:vertical;min-height:52px}
 </div>
 
 
+<!-- MODALE KPI / TABLEAU DE BORD -->
+<div class="backdrop" id="kpiBackdrop" style="z-index:260">
+  <div class="modal" style="max-width:680px">
+    <div class="m-title">📊 Tableau de bord</div>
+    <div id="kpiContent"></div>
+    <div class="m-foot">
+      <button class="btn bs" id="kpiClose">Fermer</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <!-- ZONE D'IMPRESSION COMPTE-RENDU (générée dynamiquement, masquée à l'écran) -->
@@ -897,6 +929,7 @@ let pendingComments = []; // commentaires de la tâche en cours d'édition
 // les clés manquantes (ajoutées dans des versions ultérieures de l'application),
 // pour rester compatible avec des données créées par une version antérieure.
 function migrateConfig(cfg){
+  if(typeof cfg.nextSeq !== 'number') cfg.nextSeq = 1;
   if(!cfg.columns || !Array.isArray(cfg.columns) || !cfg.columns.length) cfg.columns = JSON.parse(JSON.stringify(DEF_CONFIG.columns));
   if(!cfg.priorities || !Array.isArray(cfg.priorities) || !cfg.priorities.length) cfg.priorities = JSON.parse(JSON.stringify(DEF_CONFIG.priorities));
   if(!cfg.types) cfg.types = [];
@@ -1058,8 +1091,8 @@ function render(filter){
     const empty = zone.querySelector('.empty'); if(empty) empty.remove();
     counts[col.name] = list.length;
     const n = $(`n_${cid(col.name)}`); if(n) n.textContent = counts[col.name];
-    list.forEach((t,i)=>{
-      zone.appendChild(buildCard(t, col, i+1));
+    list.forEach((t)=>{
+      zone.appendChild(buildCard(t, col, t.seq));
     });
   });
   updateLateBadge();
@@ -1127,6 +1160,83 @@ function updateBudgetBadge(){
   }
 }
 
+// ═══════════════════════════════════════════════
+// TABLEAU DE BORD KPI
+// ═══════════════════════════════════════════════
+function renderKpi(){
+  const all = Object.values(tasks);
+  const open = all.filter(t=>!isFinalStatusName(t.status));
+  const late = all.filter(isTaskLate);
+  const totalBudget = open.reduce((sum,t)=> sum + (t.budget!=null ? Number(t.budget)||0 : 0), 0);
+
+  let html = '';
+
+  // Cartes de synthèse
+  html += '<div class="kpi-grid">';
+  html += `<div class="kpi-card"><div class="kpi-value">${all.length}</div><div class="kpi-label">Total des tâches</div></div>`;
+  html += `<div class="kpi-card"><div class="kpi-value">${open.length}</div><div class="kpi-label">En cours</div></div>`;
+  html += `<div class="kpi-card${late.length?' alert':''}"><div class="kpi-value">${late.length}</div><div class="kpi-label">En retard</div></div>`;
+  if(C.fields.budget?.on){
+    html += `<div class="kpi-card"><div class="kpi-value">${fmtBudget(totalBudget)}</div><div class="kpi-label">Budget estimé (en cours)</div></div>`;
+  }
+  html += '</div>';
+
+  // Répartition par statut
+  html += '<div class="kpi-sec"><div class="kpi-sec-title">Répartition par statut</div>';
+  const maxByStatus = Math.max(1, ...C.columns.map(c=>all.filter(t=>t.status===c.name).length));
+  C.columns.forEach(col=>{
+    const count = all.filter(t=>t.status===col.name).length;
+    const pct = Math.round((count/maxByStatus)*100);
+    html += `<div class="kpi-bar-row"><span class="kpi-bar-label">${esc(col.name)}${col.locked?' 🔒':''}</span><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;background:${col.color}"></div></div><span class="kpi-bar-count">${count}</span></div>`;
+  });
+  html += '</div>';
+
+  // Répartition par priorité (tâches ouvertes uniquement)
+  if(C.fields.prio?.on){
+    html += '<div class="kpi-sec"><div class="kpi-sec-title">Priorités (tâches en cours)</div>';
+    const maxByPrio = Math.max(1, ...C.priorities.map(p=>open.filter(t=>t.priority===p.name).length));
+    C.priorities.forEach(p=>{
+      const count = open.filter(t=>t.priority===p.name).length;
+      const pct = Math.round((count/maxByPrio)*100);
+      html += `<div class="kpi-bar-row"><span class="kpi-bar-label">${esc(p.name)}</span><div class="kpi-bar-track"><div class="kpi-bar-fill" style="width:${pct}%;background:${p.color}"></div></div><span class="kpi-bar-count">${count}</span></div>`;
+    });
+    html += '</div>';
+  }
+
+  // Liste des tâches en retard
+  html += '<div class="kpi-sec"><div class="kpi-sec-title">⚠ Tâches en retard</div>';
+  if(late.length){
+    html += '<div class="kpi-late-list">';
+    late.sort((a,b)=>(a.due||'').localeCompare(b.due||''));
+    late.forEach(t=>{
+      html += `<div class="kpi-late-item" data-id="${esc(t.id)}"><span>#${t.seq!=null?t.seq:'?'} — ${esc(t.title)}</span><span class="kpi-late-due">${fmtDate(t.due)}</span></div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<p style="font-size:.74rem;color:var(--muted)">Aucune tâche en retard 👍</p>';
+  }
+  html += '</div>';
+
+  $('kpiContent').innerHTML = html;
+
+  // Clic sur une tâche en retard : ouvre sa fiche
+  $('kpiContent').querySelectorAll('.kpi-late-item').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      const id = el.dataset.id;
+      closeKpiModal();
+      if(tasks[id]) openModal(null, id);
+    });
+  });
+}
+
+function openKpiModal(){
+  renderKpi();
+  $('kpiBackdrop').classList.add('open');
+}
+function closeKpiModal(){
+  $('kpiBackdrop').classList.remove('open');
+}
+
 function showCommTooltip(comments, e){
   const tip = $('commTooltip');
   let html = `<div class="ct-title">💬 Commentaires (${comments.length})</div>`;
@@ -1159,7 +1269,7 @@ function hideCommTooltip(){
   $('commTooltipBackdrop').classList.remove('show');
 }
 
-function buildCard(t, col, num){
+function buildCard(t, col, seq){
   const card = document.createElement('div');
   card.className = 'card';
   card.dataset.id = t.id;
@@ -1277,7 +1387,7 @@ function buildCard(t, col, num){
 
   card.innerHTML = `
     <div class="card-head">
-      <span class="card-num">#${num}</span>
+      <span class="card-num">#${seq != null ? seq : '?'}</span>
       <div class="card-prio-dot" style="background:${prioColor}"></div>
       <div class="card-title">${esc(t.title)}</div>
       <div class="card-btns">
@@ -1443,6 +1553,7 @@ let currentView = 'board'; // 'board' | 'list'
 let listSort = { key: 'due', dir: 'asc' };
 
 const LIST_COLUMNS = [
+  { key:'seq',     label:'#',         get:t=>t.seq!=null ? '#'+t.seq : '' },
   { key:'title',   label:'Titre',     get:t=>t.title||'' },
   { key:'status',  label:'Statut',    get:t=>t.status||'' },
   { key:'priority',label:'Priorité',  get:t=>t.priority||'' },
@@ -1486,6 +1597,7 @@ function renderList(filterFn){
     const col = LIST_COLUMNS.find(c=>c.key===listSort.key);
     let va = col.get(a), vb = col.get(b);
     if(col.key==='budget'){ va = va==null?-Infinity:Number(va); vb = vb==null?-Infinity:Number(vb); }
+    else if(col.key==='seq'){ va = a.seq!=null?a.seq:-Infinity; vb = b.seq!=null?b.seq:-Infinity; }
     else if(col.key==='due'){ va = va || '9999-99-99'; vb = vb || '9999-99-99'; }
     else { va = String(va).toLowerCase(); vb = String(vb).toLowerCase(); }
     if(va < vb) return listSort.dir==='asc' ? -1 : 1;
@@ -1517,6 +1629,10 @@ function renderList(filterFn){
       if(c.fieldKey && C.fields[c.fieldKey] && !C.fields[c.fieldKey].on) return;
       const td = document.createElement('td');
       switch(c.key){
+        case 'seq':
+          td.className = 'lt-num';
+          td.textContent = c.get(t);
+          break;
         case 'title':
           td.className = 'lt-title';
           td.textContent = t.title;
@@ -1639,6 +1755,17 @@ function nextOrderInColumn(statusName){
   return max + 1;
 }
 
+// Numéro global séquentiel et unique, attribué une seule fois à la création
+// de la tâche et jamais modifié ensuite (identifiant lisible, ex: #42).
+// Basé sur un compteur persistant (C.nextSeq) pour ne jamais réutiliser un
+// numéro, même si la tâche correspondante est supprimée par la suite.
+function nextSeqNumber(){
+  if(typeof C.nextSeq !== 'number') C.nextSeq = 1;
+  const n = C.nextSeq;
+  C.nextSeq = n + 1;
+  return n;
+}
+
 // Liste ordonnée des IDs de tâches d'une colonne (même tri que render())
 function orderedTaskIdsInColumn(statusName){
   return Object.values(tasks)
@@ -1663,6 +1790,14 @@ function normalizeTaskOrders(){
       if(t && t.order !== i+1){ t.order = i+1; changed = true; }
     });
   });
+  // Numéro global unique (#1, #2...) : attribué dans l'ordre de création aux
+  // tâches qui n'en ont pas encore (ex: données créées avant cette fonctionnalité).
+  const withoutSeq = Object.values(tasks).filter(t=>typeof t.seq !== 'number');
+  if(withoutSeq.length){
+    withoutSeq.sort((a,b)=>(a.createdAt||'').localeCompare(b.createdAt||''));
+    if(typeof C.nextSeq !== 'number') C.nextSeq = 1;
+    withoutSeq.forEach(t=>{ t.seq = C.nextSeq++; changed = true; });
+  }
   return changed;
 }
 
@@ -1725,8 +1860,10 @@ function saveTask(){
   if(order === undefined || order === null || (existing && existing.status !== newStatus)){
     order = nextOrderInColumn(newStatus);
   }
+  const seq = existing?.seq != null ? existing.seq : nextSeqNumber();
   tasks[id] = {
     id, title,
+    seq,
     desc:      $('mDesc').value.trim(),
     status:    newStatus,
     order,
@@ -2238,7 +2375,7 @@ function importJSON(e){
       else if(d.tasks){ tasks=d.tasks; }
       else{ toast('⚠ Format invalide'); return; }
       migrateConfig(C);
-      normalizeTaskOrders();
+      if(normalizeTaskOrders()) scheduleSave();
       initBoard(); buildFilterBar(); applyFilters(); applyLabels();
       if(settingsOpen) renderSettings();
       toast(`✅ ${Object.keys(tasks).length} tâches importées`);
@@ -2264,6 +2401,9 @@ document.querySelectorAll('.s-tab').forEach(tab=>{
 // ═══════════════════════════════════════════════
 $('btnNew').addEventListener('click', ()=>openModal());
 $('btnViewToggle').addEventListener('click', toggleView);
+$('btnKpi').addEventListener('click', openKpiModal);
+$('kpiClose').addEventListener('click', closeKpiModal);
+$('kpiBackdrop').addEventListener('click', e=>{ if(e.target===$('kpiBackdrop')) closeKpiModal(); });
 $('lateBadge').addEventListener('click', ()=>{
   lateFilterActive = !lateFilterActive;
   $('lateBadge').style.outline = lateFilterActive ? '2px solid #f87171' : '';
@@ -2317,7 +2457,7 @@ $('btnPjAddUrl').addEventListener('click', addPjUrl);
 $('mPjUrl').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addPjUrl(); }});
 $('mPjFile').addEventListener('change', e=>{ if(e.target.files.length) addPjFiles(e.target.files); });
 document.addEventListener('keydown', e=>{
-  if(e.key==='Escape'){ closeModal(); $('confirmBackdrop').classList.remove('open'); $('pwdBackdrop').classList.remove('open'); hideCommTooltip(); }
+  if(e.key==='Escape'){ closeModal(); $('confirmBackdrop').classList.remove('open'); $('pwdBackdrop').classList.remove('open'); $('kpiBackdrop').classList.remove('open'); hideCommTooltip(); }
   if(e.key==='Enter' && e.ctrlKey && $('backdrop').classList.contains('open')) saveTask();
 });
 $('commTooltipBackdrop').addEventListener('click', hideCommTooltip);
@@ -2858,11 +2998,12 @@ async function doFirstConnect(){
     if(data.v>=2 && data.C){ C=data.C; tasks=data.tasks||{}; }
     else if(data.tasks){ tasks=data.tasks; }
     migrateConfig(C);
-    normalizeTaskOrders();
+    const needsSave = normalizeTaskOrders();
 
     // Enregistre la configuration de synchronisation pour cet appareil
     syncCfg = cfg;
     saveSyncCfg();
+    if(needsSave) scheduleSave();
 
     closeFirstConnectScreen();
     initBoard(); buildFilterBar(); applyFilters(); applyLabels();
@@ -3002,7 +3143,7 @@ async function syncLoad(){
       if(data.v>=2&&data.C){C=data.C;tasks=data.tasks||{};}
       else if(data.tasks){tasks=data.tasks;}
       migrateConfig(C);
-      normalizeTaskOrders();
+      const needsNormSave = normalizeTaskOrders();
       // Adopte les comptes partagés (créations/modifications faites par un autre
       // admin depuis un autre appareil), tant qu'un identifiant administrateur
       // local n'est pas perdu dans l'opération.
@@ -3033,6 +3174,7 @@ async function syncLoad(){
       }
       initBoard(); buildFilterBar(); applyFilters(); applyLabels();
       setSyncStatus('ok','Synchronisé '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
+      if(needsNormSave) scheduleSave();
     }
   } catch(e){
     setSyncStatus('err','Erreur : '+e.message);
